@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.5)
 
 project(libmodutil)
 
@@ -27,9 +27,11 @@ set(support_src support/cleanse.cpp
                 support/lockedpool.cpp)
 
 set(util_src    
-                base58.cpp
+				arith_uint256.cpp
+				base58.cpp
                 bech32.cpp
-                fs.cpp
+                clientversion.cpp
+				fs.cpp
                 hash.cpp
                 netaddress.cpp
                 netbase.cpp           
