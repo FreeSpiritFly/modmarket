@@ -3,10 +3,10 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#if defined(HAVE_CONFIG_H)
+/*#if defined(HAVE_CONFIG_H)
 #include <config/bitcoin-config.h>
 #endif
-
+*/
 #include <init.h>
 #include <compat/sanity.h>
 #include <fs.h>

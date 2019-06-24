@@ -12,13 +12,14 @@ set(CMAKE_MODULE_PATH
    )
 
 
-include_directories(libmodutil)
-include_directories(libmodhttprpc)
+#include_directories(libmodutil)
+#include_directories(libmodhttprpc)
+include_directories(.)
 LINK_DIRECTORIES( ./libs)
 
 
 add_subdirectory(libmodutil)
 add_subdirectory(libmodhttprpc)
 add_subdirectory(libmodp2p)
-#add_subdirectory(libmodcrypto)
+add_subdirectory(libmodcrypto)
 add_subdirectory(httprpc)

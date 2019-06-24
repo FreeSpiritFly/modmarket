@@ -2,8 +2,6 @@
 
 cmake_minimum_required(VERSION 3.5)
 project(secp256k1)
-include(AddCompilerFlags)
-
 
 # libsecp256k1 use a different set of flags.
 add_compiler_flag(

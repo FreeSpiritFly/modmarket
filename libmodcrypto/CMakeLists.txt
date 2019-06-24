@@ -1,165 +1,90 @@
 # Copyright (c) 2017 The Bitcoin developers
 
 cmake_minimum_required(VERSION 3.5)
-project()
-include(AddCompilerFlags)
+project(libmodcrypto)
 
-
-# libsecp256k1 use a different set of flags.
-add_compiler_flag(
-	-pedantic
-	-Wshadow
-	-Wno-unused-function
-	-Wno-nonnull
-	-Wno-overlength-strings
-)
-
-add_c_compiler_flag(
-	-std=c89
-	-Wno-long-long
-)
+set(CMAKE_CXX_STANDARD 11)
 
 # Default visibility is hidden on all targets.
 set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+# Enable warning
+include(AddCompilerFlags)
 
-include_directories(
-	.
-	src
-	# For the config
-	${CMAKE_CURRENT_BINARY_DIR}/src
+add_c_compiler_flag(-Wnested-externs -Wstrict-prototypes)
+add_compiler_flag(
+	-Wall
+	-Wextra
+	-Wformat
+	-Wvla
+	-Wformat-security
+	-Wcast-align
+	-Wunused-parameter
+	# FIXME: Activating this flag cause cmake to fail on leveldb.
+	# -Wthread-safety-analysis
+	-Wshadow
 )
 
-# The library
-add_library(secp256k1 src/secp256k1.c)
-target_include_directories(secp256k1 PUBLIC include)
-
-# We need to link in GMP
-find_package(GMP)
-if(GMP_FOUND)
-	target_include_directories(secp256k1 PUBLIC ${GMP_INCLUDE_DIR})
-	target_link_libraries(secp256k1 ${GMP_LIBRARY})
-	set(USE_NUM_GMP 1)
-	set(USE_FIELD_INV_NUM 1)
-	set(USE_SCALAR_INV_NUM 1)
+option(EXTRA_WARNINGS "Enable extra warnings" OFF)
+if(EXTRA_WARNINGS)
+	add_cxx_compiler_flag(-Wsuggest-override)
 else()
-	set(USE_NUM_NONE 1)
-	set(USE_FIELD_INV_BUILTIN 1)
-	set(USE_SCALAR_INV_BUILTIN 1)
+	add_compiler_flag(-Wno-unused-parameter)
 endif()
 
-# We check if amd64 asm is supported.
-check_c_source_compiles("
-	#include <stdint.h>
-	int main() {
-		uint64_t a = 11, tmp;
-		__asm__ __volatile__(\"movq \$0x100000000,%1; mulq %%rsi\" : \"+a\"(a) : \"S\"(tmp) : \"cc\", \"%rdx\");
-		return 0;
-	}
-" USE_ASM_X86_64)
+# Create a target for OpenSSL
+include(BrewHelper)
+find_brew_prefix(OPENSSL_ROOT_DIR openssl)
+find_package(OpenSSL REQUIRED)
 
-# We make sure __int128 is defined
-include(CheckTypeSize)
-check_type_size(__int128 SIZEOF___INT128)
-if(SIZEOF___INT128 EQUAL 16)
-	set(HAVE___INT128 1)
-else()
-	# If we do not support __int128, we should be falling back
-	# on 32bits implementations for field and scalar.
-endif()
+# libtool style configure
+#add_subdirectory(config)
 
-# Detect if we are on a 32 or 64 bits plateform and chose
-# scalar and filed implementation accordingly
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-	# 64 bits implementationr require either __int128 or asm support.
-	if (HAVE___INT128 OR USE_ASM_X86_64)
-		set(USE_SCALAR_4X64 1)
-		set(USE_FIELD_5X52 1)
-	else()
-		message(SEND_ERROR "Compiler does not support __int128 or insline assembly")
-	endif()
-else()
-	set(USE_SCALAR_8X32 1)
-	set(USE_FIELD_10X26 1)
-endif()
+# libraries
+add_subdirectory(crypto)
+add_subdirectory(secp256k1)
 
-# Executable internal to secp256k1 need to have the HAVE_CONFIG_H define set.
-# For convenience, we wrap this into a function.
-function(link_secp256k1_internal NAME)
-	target_link_libraries(${NAME} secp256k1)
-	target_compile_definitions(${NAME} PRIVATE HAVE_CONFIG_H SECP256K1_BUILD)
-endfunction(link_secp256k1_internal)
+# Because the Bitcoin ABc source code is disorganised, we
+# end up with a bunch of libraries without any aparent
+# cohesive structure. This is inherited from Bitcoin Core
+# and reflecting this.
+# TODO: Improve the structure once cmake is rocking.
+set(compat_src  compat/glibc_compat.cpp
+                compat/glibc_sanity.cpp
+                compat/glibcxx_sanity.cpp
+                compat/strnlen.cpp)
 
-# Phony target to build benchmarks
-add_custom_target(bench-secp256k1)
+# Various completely unrelated features shared by all executables.
+add_library(modcrypto
+    key.cpp
+    pubkey.cpp
+	random.cpp
+)
 
-function(add_secp256k1_bench NAME)
-	add_executable(${NAME} EXCLUDE_FROM_ALL ${ARGN})
-	link_secp256k1_internal(${NAME})
-	add_dependencies(bench-secp256k1 ${NAME})
-endfunction(add_secp256k1_bench)
+target_compile_definitions(modcrypto PUBLIC HAVE_CONFIG_H)
+target_include_directories(modcrypto
+	PUBLIC
+		.
+		# To access the config.
+		${CMAKE_CURRENT_BINARY_DIR}
+)
+# Boost packages
+set(BOOST_PACKAGES_REQUIRED chrono filesystem program_options thread)
 
-# Recovery module
-option(SECP256K1_ENABLE_MODULE_RECOVERY "Build libsecp256k1's recovery module" ON)
-if(SECP256K1_ENABLE_MODULE_RECOVERY)
-	set(ENABLE_MODULE_RECOVERY 1)
-	add_secp256k1_bench(bench_recover src/bench_recover.c)
-endif()
+function(prepend var prefix)
+	set(listVar "")
+	foreach(f ${ARGN})
+		list(APPEND listVar "${prefix}${f}")
+	endforeach(f)
+	set(${var} "${listVar}" PARENT_SCOPE)
+endfunction(prepend)
 
-# ECDH module
-option(SECP256K1_ENABLE_MODULE_ECDH "Build libsecp256k1's ECDH module" OFF)
-if(SECP256K1_ENABLE_MODULE_ECDH)
-	set(ENABLE_MODULE_ECDH 1)
-	add_secp256k1_bench(bench_ecdh src/bench_ecdh.c)
-endif()
+prepend(BOOST_LIBRARIES "boost_" ${BOOST_PACKAGES_REQUIRED})
 
-# MultiSet module
-option(SECP256K1_ENABLE_MODULE_MULTISET "Build libsecp256k1's MULTISET module" ON)
-if(SECP256K1_ENABLE_MODULE_MULTISET)
-    set(ENABLE_MODULE_MULTISET 1)
-	add_secp256k1_bench(bench_multiset src/bench_multiset.c)
-endif()
+find_package(Boost 1.58 REQUIRED ${BOOST_PACKAGES_REQUIRED})
+target_link_libraries(modcrypto crypto secp256k1  ${BOOST_LIBRARIES})
 
-# Static precomputation for eliptic curve mutliplication
-option(SECP256K1_ECMULT_STATIC_PRECOMPUTATION "Precompute libsecp256k1's eliptic curve mutliplication tables" ON)
-if(SECP256K1_ECMULT_STATIC_PRECOMPUTATION)
-	set(USE_ECMULT_STATIC_PRECOMPUTATION 1)
+# Make sure boost uses std::atomic (it doesn't before 1.63)
+target_compile_definitions(modcrypto PUBLIC BOOST_SP_USE_STD_ATOMIC BOOST_AC_USE_STD_ATOMIC)
 
-	include(NativeExecutable)
-	add_native_executable(gen_context src/gen_context.c)
 
-	add_custom_command(
-		OUTPUT ecmult_static_context.h
-		COMMAND gen_context
-	)
-
-	target_sources(secp256k1 PRIVATE ecmult_static_context.h)
-endif()
-
-# Generate the config
-configure_file(src/libsecp256k1-config.h.cmake.in src/libsecp256k1-config.h ESCAPE_QUOTES)
-target_compile_definitions(secp256k1 PRIVATE HAVE_CONFIG_H SECP256K1_BUILD)
-
-# Tests
-option(SECP256K1_BUILD_TEST "Build secp256k1's unit tests" ON)
-if(SECP256K1_BUILD_TEST)
-	include(TestSuite)
-	create_test_suite(secp256k1)
-
-	function(create_secp256k1_test NAME FILES)
-		add_test_to_suite(secp256k1 ${NAME} EXCLUDE_FROM_ALL ${FILES})
-		link_secp256k1_internal(${NAME})
-	endfunction()
-
-	create_secp256k1_test(secp256k1_tests src/tests.c)
-	target_compile_definitions(secp256k1_tests PRIVATE VERIFY)
-
-	create_secp256k1_test(exhaustive_tests src/tests_exhaustive.c)
-	# This should not be enabled at the same time as coverage is.
-	# TODO: support coverage.
-	target_compile_definitions(exhaustive_tests PRIVATE VERIFY)
-endif(SECP256K1_BUILD_TEST)
-
-# Benchmarks
-add_secp256k1_bench(bench_verify src/bench_verify.c)
-add_secp256k1_bench(bench_sign src/bench_sign.c)
-add_secp256k1_bench(bench_internal src/bench_internal.c)
